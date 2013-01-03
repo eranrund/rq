@@ -443,9 +443,20 @@ class Worker(object):
                 traceback.format_exception(*exc_info))
         self.log.error(exc_string)
 
+        result_ttl =  self.default_result_ttl if job.result_ttl is None else job.result_ttl
         job.ended_at = times.now()
         job.exc_info = exc_string
-        job.save()
+        job._status = Status.FAILED
+        p = self.connection.pipeline()
+        p.hset(job.key, 'ended_at', job.ended_at)
+        p.hset(job.key, 'exc_info', job.exc_info)
+        p.hset(job.key, 'status', job._status)
+        if result_ttl > 0:
+            p.expire(job.key, result_ttl)
+            self.log.info('Result is kept for %d seconds.' % result_ttl)
+        else:
+            self.log.warning('Result will never expire, clean up result key manually.')
+        p.execute()
 
         for handler in reversed(self._exc_handlers):
             self.log.debug('Invoking exception handler %s' % (handler,))
