@@ -177,6 +177,7 @@ class Job(object):
         self.timeout = None
         self.result_ttl = None
         self._status = None
+        self._num_enqueued_jobs = None
         self.meta = {}
 
 
@@ -279,6 +280,7 @@ class Job(object):
         self.result_ttl = int(obj.get('result_ttl')) if obj.get('result_ttl') else None # noqa
         self._status = obj.get('status') if obj.get('status') else None
         self.meta = unpickle(obj.get('meta')) if obj.get('meta') else {}
+        self._num_enqueued_jobs = obj.get('num_enqueued_jobs')
 
     def save(self):
         """Persists the current job instance to its corresponding Redis key."""
@@ -338,6 +340,16 @@ class Job(object):
             assert self.id == _job_stack.pop()
         return self._result
 
+    # Job queue position tracking stuff
+    def _get_num_enqueued_jobs(self):
+        return self._num_enqueued_jobs
+
+    def _set_num_enqueued_jobs(self, num_enqueued_jobs):
+        self._num_enqueued_jobs = num_enqueued_jobs
+        self.connection.hset(self.key, 'num_enqueued_jobs', self._num_enqueued_jobs)
+
+    num_enqueued_jobs = property(_get_num_enqueued_jobs, _set_num_enqueued_jobs)
+
 
     # Representation
     def get_call_string(self):  # noqa
@@ -385,6 +397,7 @@ class Job(object):
         private_attrs = set(['origin', '_func_name', 'ended_at',
             'description', '_args', 'created_at', 'enqueued_at', 'connection',
             '_result', 'result', 'timeout', '_kwargs', '_exc_info', 'exc_info', '_id',
+            '_num_enqueued_jobs', 'num_enqueued_jobs',
             'data', '_instance', 'result_ttl', '_status', 'status', 'meta'])
 
         if name in private_attrs:

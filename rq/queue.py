@@ -55,6 +55,10 @@ class Queue(object):
         """Returns the Redis key for this Queue."""
         return self._key
 
+    @property
+    def enqueues_count_key(self):
+        return self.key + ':enqueues'
+
     def empty(self):
         """Removes all messages on the queue."""
         self.connection.delete(self.key)
@@ -100,11 +104,6 @@ class Queue(object):
                 break
             if Job.exists(job_id, self.connection):
                 self.connection.rpush(self.key, job_id)
-
-
-    def push_job_id(self, job_id):  # noqa
-        """Pushes a job ID on the corresponding Redis queue."""
-        self.connection.rpush(self.key, job_id)
 
     def enqueue_call(self, func, args=None, kwargs=None, timeout=None, result_ttl=None): #noqa
         """Creates a job to represent the delayed function call and enqueues
@@ -175,7 +174,12 @@ class Queue(object):
         job.save()
 
         if self._async:
-            self.push_job_id(job.id)
+            p = self.connection.pipeline()
+            p.rpush(self.key, job.id)
+            p.incr(self.enqueues_count_key)
+            _, num_enqueued_jobs = p.execute()
+
+            job.num_enqueued_jobs = num_enqueued_jobs - 1
         else:
             job.perform()
             job.save()
