@@ -292,8 +292,6 @@ class FailedQueue(Queue):
         must not be overridden (e.g. `origin` or `enqueued_at`) and other meta
         data must be inserted (`ended_at` and `exc_info`).
         """
-        job.ended_at = times.now()
-        job.exc_info = exc_info
         return self.enqueue_job(job, timeout=job.timeout, set_meta_data=False)
 
     def requeue(self, job_id):

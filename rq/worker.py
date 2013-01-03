@@ -3,6 +3,7 @@ import os
 import errno
 import random
 import time
+import times
 try:
     from procname import setprocname
 except ImportError:
@@ -397,7 +398,11 @@ class Worker(object):
             job._status = Status.FINISHED
         except:
             # Use the public setter here, to immediately update Redis
-            self.handle_exception(job, *sys.exc_info())
+            try:
+                self.handle_exception(job, *sys.exc_info())
+            except:
+                self.log.exception('Failed handling exception')
+
             job.status = Status.FAILED
             return False
 
@@ -436,6 +441,10 @@ class Worker(object):
                 traceback.format_exception_only(*exc_info[:2]) +
                 traceback.format_exception(*exc_info))
         self.log.error(exc_string)
+
+        job.ended_at = times.now()
+        job.exc_info = exc_string
+        job.save()
 
         for handler in reversed(self._exc_handlers):
             self.log.debug('Invoking exception handler %s' % (handler,))
