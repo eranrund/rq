@@ -95,7 +95,7 @@ class Worker(object):
 
 
     def __init__(self, queues, name=None, default_result_ttl=DEFAULT_RESULT_TTL,
-            connection=None, exc_handler=None):  # noqa
+            connection=None, exc_handler=None, failed_queue=False):  # noqa
         if connection is None:
             connection = get_current_connection()
         self.connection = connection
@@ -111,11 +111,11 @@ class Worker(object):
         self._horse_pid = 0
         self._stopped = False
         self.log = logging.getLogger('worker')
-        self.failed_queue = get_failed_queue(connection=self.connection)
 
-        # By default, push the "move-to-failed-queue" exception handler onto
-        # the stack
-        self.push_exc_handler(self.move_to_failed_queue)
+        if failed_queue:
+            self.failed_queue = get_failed_queue(connection=self.connection)
+            self.push_exc_handler(self.move_to_failed_queue)
+
         if exc_handler is not None:
             self.push_exc_handler(exc_handler)
 
@@ -312,7 +312,8 @@ class Worker(object):
                     self.log.debug('Data follows:')
                     self.log.debug(e.raw_data)
                     self.log.debug('End of unreadable data.')
-                    self.failed_queue.push_job_id(e.job_id)
+                    if self.failed_queue:
+                        self.failed_queue.push_job_id(e.job_id)
                     continue
 
                 self.state = 'busy'
