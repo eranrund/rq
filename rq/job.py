@@ -173,7 +173,7 @@ class Job(object):
         self.enqueued_at = None
         self.ended_at = None
         self._result = None
-        self.exc_info = None
+        self._exc_info = None
         self.timeout = None
         self.result_ttl = None
         self._status = None
@@ -238,6 +238,16 @@ class Job(object):
     """Backwards-compatibility accessor property `return_value`."""
     return_value = result
 
+    def get_exc_info(self):
+        if self._exc_info is None:
+            self._exc_info = self.connection.hget(self.key, 'exc_info')
+
+        return self._exc_info
+
+    def set_exc_info(self, exc_info):
+        self._exc_info = exc_info
+
+    exc_info = property(get_exc_info, set_exc_info)
 
     # Persistence
     def refresh(self):  # noqa
@@ -264,7 +274,7 @@ class Job(object):
         self.enqueued_at = to_date(obj.get('enqueued_at'))
         self.ended_at = to_date(obj.get('ended_at'))
         self._result = unpickle(obj.get('result')) if obj.get('result') else None  # noqa
-        self.exc_info = obj.get('exc_info')
+        self._exc_info = obj.get('exc_info')
         self.timeout = int(obj.get('timeout')) if obj.get('timeout') else None
         self.result_ttl = int(obj.get('result_ttl')) if obj.get('result_ttl') else None # noqa
         self._status = obj.get('status') if obj.get('status') else None
@@ -289,8 +299,8 @@ class Job(object):
             obj['ended_at'] = times.format(self.ended_at, 'UTC')
         if self._result is not None:
             obj['result'] = dumps(self._result)
-        if self.exc_info is not None:
-            obj['exc_info'] = self.exc_info
+        if self._exc_info is not None:
+            obj['exc_info'] = self._exc_info
         if self.timeout is not None:
             obj['timeout'] = self.timeout
         if self.result_ttl is not None:
@@ -374,7 +384,7 @@ class Job(object):
         # Ignore the "private" fields
         private_attrs = set(['origin', '_func_name', 'ended_at',
             'description', '_args', 'created_at', 'enqueued_at', 'connection',
-            '_result', 'result', 'timeout', '_kwargs', 'exc_info', '_id',
+            '_result', 'result', 'timeout', '_kwargs', '_exc_info', 'exc_info', '_id',
             'data', '_instance', 'result_ttl', '_status', 'status', 'meta'])
 
         if name in private_attrs:
