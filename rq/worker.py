@@ -12,11 +12,7 @@ import socket
 import signal
 import traceback
 from cPickle import dumps
-try:
-    from logbook import Logger
-    Logger = Logger   # Does nothing except it shuts up pyflakes annoying error
-except ImportError:
-    from logging import Logger
+import logging
 from .queue import Queue, get_failed_queue
 from .connections import get_current_connection
 from .job import Status
@@ -113,7 +109,7 @@ class Worker(object):
         self._is_horse = False
         self._horse_pid = 0
         self._stopped = False
-        self.log = Logger('worker')
+        self.log = logging.getLogger('worker')
         self.failed_queue = get_failed_queue(connection=self.connection)
 
         # By default, push the "move-to-failed-queue" exception handler onto
@@ -375,7 +371,7 @@ class Worker(object):
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
         self._is_horse = True
-        self.log = Logger('horse')
+        self.log = logging.getLogger('horse')
 
         success = self.perform_job(job)
 
