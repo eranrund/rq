@@ -397,8 +397,8 @@ class Worker(object):
             job._status = Status.FINISHED
         except:
             # Use the public setter here, to immediately update Redis
-            job.status = Status.FAILED
             self.handle_exception(job, *sys.exc_info())
+            job.status = Status.FAILED
             return False
 
         if rv is None:
