@@ -14,7 +14,7 @@ def enum(name, *sequential, **named):
     return type(name, (), values)
 
 Status = enum('Status', QUEUED='queued', FINISHED='finished', FAILED='failed',
-                        STARTED='started')
+                        STARTED='started', CANCELED='canceled')
 
 
 def unpickle(pickled_string):
@@ -179,6 +179,7 @@ class Job(object):
         self._status = None
         self._num_enqueued_jobs = None
         self.meta = {}
+        self._canceled = None
 
 
     # Data access
@@ -281,6 +282,7 @@ class Job(object):
         self._status = obj.get('status') if obj.get('status') else None
         self.meta = unpickle(obj.get('meta')) if obj.get('meta') else {}
         self._num_enqueued_jobs = obj.get('num_enqueued_jobs')
+        self._canceled = obj.get('canceled')
 
     def save(self):
         """Persists the current job instance to its corresponding Redis key."""
@@ -311,19 +313,27 @@ class Job(object):
             obj['status'] = self._status
         if self.meta:
             obj['meta'] = dumps(self.meta)
+        if self._canceled is not None:
+            obj['canceled'] = self._canceled
 
         self.connection.hmset(key, obj)
 
+    @property
+    def canceled(self):
+        if self._canceled is None:
+            self._canceled = self.connection.hget(self.key, 'canceled')
+
+        return self._canceled
+
     def cancel(self):
         """Cancels the given job, which will prevent the job from ever being
-        ran (or inspected).
-
-        This method merely exists as a high-level API call to cancel jobs
-        without worrying about the internals required to implement job
-        cancellation.  Technically, this call is (currently) the same as just
-        deleting the job hash.
+        ran (or inspected). If the job already began executing, it can inspect
+        the cancel property and abort prematurely.
         """
-        self.delete()
+
+        self._canceled = True
+        self.connection.hset(self.key, 'canceled', True)
+
 
     def delete(self):
         """Deletes the job hash from Redis."""
@@ -403,7 +413,7 @@ class Job(object):
         private_attrs = set(['origin', '_func_name', 'ended_at',
             'description', '_args', 'created_at', 'enqueued_at', 'connection',
             '_result', 'result', 'timeout', '_kwargs', '_exc_info', 'exc_info', '_id',
-            '_num_enqueued_jobs', 'num_enqueued_jobs',
+            '_num_enqueued_jobs', 'num_enqueued_jobs', '_canceled', 'canceled',
             'data', '_instance', 'result_ttl', '_status', 'status', 'meta'])
 
         if name in private_attrs:

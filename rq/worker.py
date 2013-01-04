@@ -300,7 +300,7 @@ class Worker(object):
                 wait_for_job = not burst
                 try:
                     result = Queue.dequeue_any(self.queues, wait_for_job, \
-                            connection=self.connection)
+                            connection=self.connection, skip_canceled=False)
                     if result is None:
                         break
                 except StopRequested:
@@ -319,12 +319,35 @@ class Worker(object):
                 self.state = 'busy'
 
                 job, queue = result
-                # Use the public setter here, to immediately update Redis
-                job.status = Status.STARTED
-                self.log.info('%s: %s (%s)' % (green(queue.name),
-                    blue(job.description), job.id))
 
-                self.fork_and_perform_job(job)
+                # Check if job got canceled
+                if not job.canceled:
+                    # No, run it
+                    # Use the public setter here, to immediately update Redis
+                    job.status = Status.STARTED
+                    self.log.info('%s: %s (%s)' % (green(queue.name),
+                        blue(job.description), job.id))
+
+                    self.fork_and_perform_job(job)
+                else:
+                    # Job canceled, set expiry according to result_ttl and log
+                    self.log.info('%s: %s (%s) - canceled' % (green(queue.name),
+                        blue(job.description), job.id))
+
+                    result_ttl =  self.default_result_ttl if job.result_ttl is None else job.result_ttl  # noqa
+                    if result_ttl == 0:
+                        job.delete()
+                        self.log.info('Result discarded immediately.')
+                    else:
+                        job._status = Status.CANCELED
+                        p = self.connection.pipeline()
+                        p.hset(job.key, 'status', job._status)
+                        if result_ttl > 0:
+                            p.expire(job.key, result_ttl)
+                            self.log.info('Result is kept for %d seconds.' % result_ttl)
+                        else:
+                            self.log.warning('Result will never expire, clean up result key manually.')
+                        p.execute()
 
                 did_perform_work = True
         finally:

@@ -253,7 +253,8 @@ class Queue(object):
                 return None
             try:
                 job = Job.fetch(job_id, connection=self.connection)
-                return job
+                if not job.canceled:
+                    return job
             except NoSuchJobError as e:
                 # Silently pass on jobs that don't exist (anymore),
                 # and continue by retrying
@@ -265,7 +266,7 @@ class Queue(object):
                 raise e
 
     @classmethod
-    def dequeue_any(cls, queues, blocking, connection=None):
+    def dequeue_any(cls, queues, blocking, connection=None, skip_canceled=True):
         """Class method returning the Job instance at the front of the given
         set of Queues, where the order of the queues is important.
 
@@ -283,7 +284,8 @@ class Queue(object):
             queue = cls.from_queue_key(queue_key, connection=connection)
             try:
                 job = Job.fetch(job_id, connection=connection)
-                return job, queue
+                if not job.canceled or not skip_canceled:
+                    return job, queue
             except NoSuchJobError:
                 # Silently pass on jobs that don't exist (anymore),
                 # and continue by retrying
