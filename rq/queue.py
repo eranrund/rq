@@ -247,21 +247,22 @@ class Queue(object):
 
         Returns a Job instance, which can be executed or inspected.
         """
-        job_id = self.pop_job_id()
-        if job_id is None:
-            return None
-        try:
-            job = Job.fetch(job_id, connection=self.connection)
-        except NoSuchJobError as e:
-            # Silently pass on jobs that don't exist (anymore),
-            # and continue by reinvoking itself recursively
-            return self.dequeue()
-        except UnpickleError as e:
-            # Attach queue information on the exception for improved error
-            # reporting
-            e.queue = self
-            raise e
-        return job
+        while True:
+            job_id = self.pop_job_id()
+            if job_id is None:
+                return None
+            try:
+                job = Job.fetch(job_id, connection=self.connection)
+                return job
+            except NoSuchJobError as e:
+                # Silently pass on jobs that don't exist (anymore),
+                # and continue by retrying
+                pass
+            except UnpickleError as e:
+                # Attach queue information on the exception for improved error
+                # reporting
+                e.queue = self
+                raise e
 
     @classmethod
     def dequeue_any(cls, queues, blocking, connection=None):
@@ -273,24 +274,26 @@ class Queue(object):
         any of the queues, or returns None.
         """
         queue_keys = [q.key for q in queues]
-        result = cls.lpop(queue_keys, blocking, connection=connection)
-        if result is None:
-            return None
-        queue_key, job_id = result
-        queue = cls.from_queue_key(queue_key, connection=connection)
-        try:
-            job = Job.fetch(job_id, connection=connection)
-        except NoSuchJobError:
-            # Silently pass on jobs that don't exist (anymore),
-            # and continue by reinvoking the same function recursively
-            return cls.dequeue_any(queues, blocking, connection=connection)
-        except UnpickleError as e:
-            # Attach queue information on the exception for improved error
-            # reporting
-            e.job_id = job_id
-            e.queue = queue
-            raise e
-        return job, queue
+
+        while True:
+            result = cls.lpop(queue_keys, blocking, connection=connection)
+            if result is None:
+                return None
+            queue_key, job_id = result
+            queue = cls.from_queue_key(queue_key, connection=connection)
+            try:
+                job = Job.fetch(job_id, connection=connection)
+                return job, queue
+            except NoSuchJobError:
+                # Silently pass on jobs that don't exist (anymore),
+                # and continue by retrying
+                pass
+            except UnpickleError as e:
+                # Attach queue information on the exception for improved error
+                # reporting
+                e.job_id = job_id
+                e.queue = queue
+                raise e
 
 
     # Total ordering defition (the rest of the required Python methods are
