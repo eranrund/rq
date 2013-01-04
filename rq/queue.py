@@ -176,10 +176,11 @@ class Queue(object):
         if self._async:
             p = self.connection.pipeline()
             p.rpush(self.key, job.id)
+            p.rpush(self.key+':blk', True)
             p.incr(self.enqueues_count_key)
-            _, num_enqueued_jobs = p.execute()
+            _, _, num_enqueued_jobs = p.execute()
 
-            job.num_enqueued_jobs = num_enqueued_jobs - 1
+            job.num_enqueued_jobs = num_enqueued_jobs
         else:
             job.perform()
             job.save()
@@ -187,7 +188,18 @@ class Queue(object):
 
     def pop_job_id(self):
         """Pops a given job ID from this Redis queue."""
-        return self.connection.lpop(self.key)
+        pop_next_job_id = self.get_pop_next_job_id(connection)
+        return pop_next_job_id(keys=[self.key])
+
+    @classmethod
+    def get_pop_next_job_id(cls, connection):
+        return connection.register_script("""
+            local job_id = redis.call('lpop', KEYS[1])
+            if job_id then
+                redis.call('incr', KEYS[1] .. ':fetches')
+            end
+            return job_id
+        """)
 
     @classmethod
     def lpop(cls, queue_keys, blocking, connection=None):
@@ -200,14 +212,34 @@ class Queue(object):
         this way.
         """
         connection = resolve_connection(connection)
+        pop_next_job_id = cls.get_pop_next_job_id(connection)
+
         if blocking:
-            queue_key, job_id = connection.blpop(queue_keys)
-            return queue_key, job_id
+            # first, go over queues and try popping
+            # maybe there's something pending
+            for queue_key in queue_keys:
+                job_id = pop_next_job_id(keys=[queue_key])
+
+                if job_id is not None:
+                    return queue_key, job_id
+
+            # didn't get a job, need to block
+            while True:
+                queue_key, _ = connection.blpop([k+':blk' for k in queue_keys])
+                queue_key = queue_key[:-4]
+
+                # get a job
+                job_id = pop_next_job_id(keys=[queue_key])
+
+                if job_id is not None:
+                    return queue_key, job_id
+
         else:
             for queue_key in queue_keys:
-                blob = connection.lpop(queue_key)
-                if blob is not None:
-                    return queue_key, blob
+                job_id = pop_next_job_id(keys=[queue_key, queue_key+':fetches'])
+                if job_id is not None:
+                    return queue_key, job_id
+
             return None
 
     def dequeue(self):

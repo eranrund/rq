@@ -350,6 +350,12 @@ class Job(object):
 
     num_enqueued_jobs = property(_get_num_enqueued_jobs, _set_num_enqueued_jobs)
 
+    def get_position(self, queue):
+        num_job_fetches = int(self.connection.get(queue.key+':fetches'))
+        if self.num_enqueued_jobs >= num_job_fetches:
+            return self.num_enqueued_jobs - num_job_fetches
+
+        return 0
 
     # Representation
     def get_call_string(self):  # noqa
