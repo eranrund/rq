@@ -95,7 +95,8 @@ class Worker(object):
 
 
     def __init__(self, queues, name=None, default_result_ttl=DEFAULT_RESULT_TTL,
-            connection=None, exc_handler=None, failed_queue=False, logger=None):  # noqa
+            connection=None, exc_handler=None, failed_queue=False,
+            logger=None, statsd=None):  # noqa
         if connection is None:
             connection = get_current_connection()
         self.connection = connection
@@ -111,6 +112,7 @@ class Worker(object):
         self._horse_pid = 0
         self._stopped = False
         self.log = logger or logging.getLogger('worker')
+        self.statsd = statsd
 
         if failed_queue:
             self.failed_queue = get_failed_queue(connection=self.connection)
@@ -326,6 +328,7 @@ class Worker(object):
                 else:
                     # Job canceled, set expiry according to result_ttl and log
                     self.log.info('Queue %s: Skipping cancelled job %s' % (queue.name, job.id))
+                    self.statsd_job_status(job, 'canceled')
 
                     result_ttl =  self.default_result_ttl if job.result_ttl is None else job.result_ttl  # noqa
                     if result_ttl == 0:
@@ -347,6 +350,15 @@ class Worker(object):
             if not self.is_horse:
                 self.register_death()
         return did_perform_work
+
+    def statsd_job_status(self, job, status):
+        if self.statsd:
+            self.statsd.increment('.'.join([
+                job.origin,
+                'job-statuses',
+                job.func_name.replace('.', '_'),
+                status
+            ]))
 
     def fork_and_perform_job(self, job):
         """Spawns a work horse to perform the actual work and passes it a job.
@@ -418,16 +430,19 @@ class Worker(object):
             pickled_rv = dumps(rv)
             job._status = Status.FINISHED if not job.canceled else Status.CANCELED
         except:
-            # Use the public setter here, to immediately update Redis
+            self.statsd_job_status(job, 'exception')
+
             try:
                 self.handle_exception(job, *sys.exc_info())
             except:
                 self.log.exception('Failed handling exception')
 
+            # Use the public setter here, to immediately update Redis
             job.status = Status.FAILED
             return False
 
         self.log.info('Job OK')
+        self.statsd_job_status(job, 'success')
         if rv is not None:
             self.log.debug('Job result:\n%s' % (unicode(rv),))
 
