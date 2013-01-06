@@ -416,7 +416,7 @@ class Worker(object):
             # Pickle the result in the same try-except block since we need to
             # use the same exc handling when pickling fails
             pickled_rv = dumps(rv)
-            job._status = Status.FINISHED
+            job._status = Status.FINISHED if not job.canceled else Status.CANCELED
         except:
             # Use the public setter here, to immediately update Redis
             try:
