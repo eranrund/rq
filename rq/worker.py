@@ -17,14 +17,10 @@ import logging
 from .queue import Queue, get_failed_queue
 from .connections import get_current_connection
 from .job import Status
-from .utils import make_colorizer
 from .exceptions import NoQueueError, UnpickleError
 from .timeouts import death_penalty_after
 from .version import VERSION
 
-green = make_colorizer('darkgreen')
-yellow = make_colorizer('darkyellow')
-blue = make_colorizer('darkblue')
 
 DEFAULT_RESULT_TTL = 500
 
@@ -95,7 +91,7 @@ class Worker(object):
 
 
     def __init__(self, queues, name=None, default_result_ttl=DEFAULT_RESULT_TTL,
-            connection=None, exc_handler=None, failed_queue=False):  # noqa
+            connection=None, exc_handler=None, failed_queue=False, logger=None):  # noqa
         if connection is None:
             connection = get_current_connection()
         self.connection = connection
@@ -110,7 +106,7 @@ class Worker(object):
         self._is_horse = False
         self._horse_pid = 0
         self._stopped = False
-        self.log = logging.getLogger('worker')
+        self.log = logger or logging.getLogger('worker')
 
         if failed_queue:
             self.failed_queue = get_failed_queue(connection=self.connection)
@@ -183,7 +179,7 @@ class Worker(object):
 
     def register_birth(self):  # noqa
         """Registers its own birth."""
-        self.log.debug('Registering birth of worker %s' % (self.name,))
+        self.log.info('Registering birth of worker %s' % (self.name,))
         if self.connection.exists(self.key) and \
                 not self.connection.hexists(self.key, 'death'):
             raise ValueError(
@@ -201,7 +197,7 @@ class Worker(object):
 
     def register_death(self):
         """Registers its own death."""
-        self.log.debug('Registering death')
+        self.log.info('Registering death of worker %s' % (self.name,))
         with self.connection.pipeline() as p:
             # We cannot use self.state = 'dead' here, because that would
             # rollback the pipeline
@@ -231,12 +227,12 @@ class Worker(object):
         def request_force_stop(signum, frame):
             """Terminates the application (cold shutdown).
             """
-            self.log.warning('Cold shut down.')
+            self.log.warning('Cold shut down of worker %s' % (self.name,))
 
             # Take down the horse with the worker
             if self.horse_pid:
                 msg = 'Taking down horse %d with me.' % self.horse_pid
-                self.log.debug(msg)
+                self.log.info(msg)
                 try:
                     os.kill(self.horse_pid, signal.SIGKILL)
                 except OSError as e:
@@ -250,7 +246,7 @@ class Worker(object):
             """Stops the current worker loop but waits for child processes to
             end gracefully (warm shutdown).
             """
-            self.log.debug('Got signal %s.' % signal_name(signum))
+            self.log.info('Got signal %s.' % signal_name(signum))
 
             signal.signal(signal.SIGINT, request_force_stop)
             signal.signal(signal.SIGTERM, request_force_stop)
@@ -284,19 +280,18 @@ class Worker(object):
 
         did_perform_work = False
         self.register_birth()
-        self.log.info('RQ worker started, version %s' % VERSION)
+        self.log.info('RQ worker %s started, version %s' % (self.name, VERSION))
         self.state = 'starting'
         try:
             while True:
                 if self.stopped:
-                    self.log.info('Stopping on request.')
+                    self.log.info('Worker %s stopping on request.' % (self.name, ))
                     break
                 self.state = 'idle'
                 qnames = self.queue_names()
                 self.procline('Listening on %s' % ','.join(qnames))
-                self.log.info('')
-                self.log.info('*** Listening on %s...' % \
-                        green(', '.join(qnames)))
+                self.log.info('Worker %s listening on %s...' % (self.name, ', '.join(qnames)))
+
                 wait_for_job = not burst
                 try:
                     result = Queue.dequeue_any(self.queues, wait_for_job, \
@@ -306,12 +301,8 @@ class Worker(object):
                 except StopRequested:
                     break
                 except UnpickleError as e:
-                    msg = '*** Ignoring unpickleable data on %s.' % \
-                            green(e.queue.name)
-                    self.log.warning(msg)
-                    self.log.debug('Data follows:')
-                    self.log.debug(e.raw_data)
-                    self.log.debug('End of unreadable data.')
+                    msg = 'Ignoring unpickleable data on %s.' % (e.queue.name, )
+                    self.log.warning(msg+'\nData:\n'+e.raw_data)
                     if self.failed_queue:
                         self.failed_queue.push_job_id(e.job_id)
                     continue
@@ -325,28 +316,26 @@ class Worker(object):
                     # No, run it
                     # Use the public setter here, to immediately update Redis
                     job.status = Status.STARTED
-                    self.log.info('%s: %s (%s)' % (green(queue.name),
-                        blue(job.description), job.id))
+                    self.log.info('Queue %s: Starting job %s' % (queue.name, job.id))
 
                     self.fork_and_perform_job(job)
                 else:
                     # Job canceled, set expiry according to result_ttl and log
-                    self.log.info('%s: %s (%s) - canceled' % (green(queue.name),
-                        blue(job.description), job.id))
+                    self.log.info('Queue %s: Skipping cancelled job %s' % (queue.name, job.id))
 
                     result_ttl =  self.default_result_ttl if job.result_ttl is None else job.result_ttl  # noqa
                     if result_ttl == 0:
                         job.delete()
-                        self.log.info('Result discarded immediately.')
+                        self.log.debug('Result for job %s discarded immediately.' % (job.id, ))
                     else:
                         job._status = Status.CANCELED
                         p = self.connection.pipeline()
                         p.hset(job.key, 'status', job._status)
                         if result_ttl > 0:
                             p.expire(job.key, result_ttl)
-                            self.log.info('Result is kept for %d seconds.' % result_ttl)
+                            self.log.debug('Result for job %s is kept for %d seconds.' % (job.id, result_ttl))
                         else:
-                            self.log.warning('Result will never expire, clean up result key manually.')
+                            self.log.warning('Result for job %s will never expire, clean up result key manually.' % (job.id, ))
                         p.execute()
 
                 did_perform_work = True
@@ -396,7 +385,7 @@ class Worker(object):
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
         self._is_horse = True
-        self.log = logging.getLogger('horse')
+        self.log = logging.getLogger(self.log.name+'.horse.'+job.id)
 
         success = self.perform_job(job)
 
@@ -433,7 +422,7 @@ class Worker(object):
         if rv is None:
             self.log.info('Job OK')
         else:
-            self.log.info('Job OK, result = %s' % (yellow(unicode(rv)),))
+            self.log.info('Job OK, result = %s' % (unicode(rv),))
 
         # How long we persist the job result depends on the value of
         # result_ttl:
@@ -444,16 +433,16 @@ class Worker(object):
         result_ttl =  self.default_result_ttl if job.result_ttl is None else job.result_ttl  # noqa
         if result_ttl == 0:
             job.delete()
-            self.log.info('Result discarded immediately.')
+            self.log.debug('Result for job %s discarded immediately.' % (job.id, ))
         else:
             p = self.connection.pipeline()
             p.hset(job.key, 'result', pickled_rv)
             p.hset(job.key, 'status', job._status)
             if result_ttl > 0:
                 p.expire(job.key, result_ttl)
-                self.log.info('Result is kept for %d seconds.' % result_ttl)
+                self.log.debug('Result for job %s is kept for %d seconds.' % (job.id, result_ttl))
             else:
-                self.log.warning('Result will never expire, clean up result key manually.')
+                self.log.warning('Result for job %s will never expire, clean up result key manually.' % (job.id, ))
             p.execute()
 
         return True
@@ -476,9 +465,9 @@ class Worker(object):
         p.hset(job.key, 'status', job._status)
         if result_ttl > 0:
             p.expire(job.key, result_ttl)
-            self.log.info('Result is kept for %d seconds.' % result_ttl)
+            self.log.debug('Result for job %s is kept for %d seconds.' % (job.id, result_ttl))
         else:
-            self.log.warning('Result will never expire, clean up result key manually.')
+            self.log.warning('Result for job %s will never expire, clean up result key manually.' % (job.id, ))
         p.execute()
 
         for handler in reversed(self._exc_handlers):
@@ -496,7 +485,7 @@ class Worker(object):
     def move_to_failed_queue(self, job, *exc_info):
         """Default exception handler: move the job to the failed queue."""
         exc_string = ''.join(traceback.format_exception(*exc_info))
-        self.log.warning('Moving job to %s queue.' % self.failed_queue.name)
+        self.log.warning('Moving job %s to %s queue.' % (job.id, self.failed_queue.name))
         self.failed_queue.quarantine(job, exc_info=exc_string)
 
     def push_exc_handler(self, handler_func):
