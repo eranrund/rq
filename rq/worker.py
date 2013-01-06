@@ -175,12 +175,12 @@ class Worker(object):
         """Returns whether or not this is the worker or the work horse."""
         return self._is_horse
 
-    def procline(self, message):
+    def procline(self, message, prefix='rq: '):
         """Changes the current procname for the process.
 
         This can be used to make `ps -ef` output more readable.
         """
-        setprocname('rq: %s' % (message,))
+        setprocname(prefix + message)
 
 
     def register_birth(self):  # noqa
