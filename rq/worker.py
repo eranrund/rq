@@ -7,8 +7,12 @@ import times
 try:
     from procname import setprocname
 except ImportError:
-    def setprocname(*args, **kwargs):  # noqa
-        pass
+    try:
+        from setproctitle import setproctitle
+        setprocname = setproctitle
+    except ImportError:
+        def setprocname(*args, **kwargs):  # noqa
+            pass
 import socket
 import signal
 import traceback
@@ -397,8 +401,9 @@ class Worker(object):
         """Performs the actual work of a job.  Will/should only be called
         inside the work horse's process.
         """
-        self.procline('Processing %s from %s since %s' % (
+        self.procline('Processing %s (%s) from %s since %s' % (
             job.func_name,
+            job.id,
             job.origin, time.time()))
 
         try:
