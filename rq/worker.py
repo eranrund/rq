@@ -427,10 +427,9 @@ class Worker(object):
             job.status = Status.FAILED
             return False
 
-        if rv is None:
-            self.log.info('Job OK')
-        else:
-            self.log.info('Job OK, result = %s' % (unicode(rv),))
+        self.log.info('Job OK')
+        if rv is not None:
+            self.log.debug('Job result:\n%s' % (unicode(rv),))
 
         # How long we persist the job result depends on the value of
         # result_ttl:
