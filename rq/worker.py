@@ -407,7 +407,10 @@ class Worker(object):
             job.origin, time.time()))
 
         try:
-            with death_penalty_after(job.timeout or 180):
+            if job.timeout > 0:
+                with death_penalty_after(job.timeout):
+                    rv = job.perform()
+            else:
                 rv = job.perform()
 
             # Pickle the result in the same try-except block since we need to

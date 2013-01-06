@@ -154,10 +154,6 @@ class Queue(object):
     def enqueue_job(self, job, timeout=None, set_meta_data=True):
         """Enqueues a job for delayed execution.
 
-        When the `timeout` argument is sent, it will overrides the default
-        timeout value of 180 seconds.  `timeout` may either be a string or
-        integer.
-
         If the `set_meta_data` argument is `True` (default), it will update
         the properties `origin` and `enqueued_at`.
 
@@ -167,10 +163,7 @@ class Queue(object):
             job.origin = self.name
             job.enqueued_at = times.now()
 
-        if timeout:
-            job.timeout = timeout  # _timeout_in_seconds(timeout)
-        else:
-            job.timeout = 180  # default
+        job.timeout = timeout  # _timeout_in_seconds(timeout)
         job.save()
 
         if self._async:
