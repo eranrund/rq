@@ -75,16 +75,16 @@ class Queue(object):
     @property
     def jobs(self):
         """Returns a list of all (valid) jobs in the queue."""
-        def safe_fetch(job_id):
-            try:
-                job = Job.fetch(job_id, connection=self.connection)
-            except NoSuchJobError:
-                return None
-            except UnpickleError:
-                return None
-            return job
+        return compact([self.get_job(job_id) for job_id in self.job_ids])
 
-        return compact([safe_fetch(job_id) for job_id in self.job_ids])
+    def get_job(self, job_id):
+        try:
+            job = Job.fetch(job_id, connection=self.connection)
+        except NoSuchJobError:
+            return None
+        except UnpickleError:
+            return None
+        return job
 
     @property
     def count(self):
