@@ -281,7 +281,7 @@ class Job(object):
         self.result_ttl = int(obj.get('result_ttl')) if obj.get('result_ttl') else None # noqa
         self._status = obj.get('status') if obj.get('status') else None
         self.meta = unpickle(obj.get('meta')) if obj.get('meta') else {}
-        self._num_enqueued_jobs = obj.get('num_enqueued_jobs')
+        self._num_enqueued_jobs = int(obj.get('num_enqueued_jobs')) if obj.has_key('num_enqueued_jobs') else None
         self._canceled = obj.get('canceled')
 
     def save(self):
